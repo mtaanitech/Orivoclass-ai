@@ -295,9 +295,17 @@ const ORIGIN = location.origin;
 let mode = "login", keys = [], config = {}, history = [], pending = [], pgBusy = false;
 
 async function api(path, method = "GET", body) {
-  const r = await fetch(path, { method, headers: { "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
-  const d = await r.json().catch(() => ({}));
-  if (!r.ok) { if (r.status === 401 && path !== "/auth/login") showAuth(); throw Object.assign(new Error(d.error || "Something went wrong"), { status: r.status }); }
+  let r;
+  try { r = await fetch(path, { method, headers: { "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined }); }
+  catch { throw new Error("Cannot reach the Orivoclass server. Start it with: node server.js  and open http://localhost:3000 in your browser."); }
+  const isJson = (r.headers.get("content-type") || "").includes("json");
+  const d = isJson ? await r.json().catch(() => ({})) : {};
+  if (!r.ok) {
+    if (r.status === 401 && path !== "/auth/login") showAuth();
+    const msg = d.error || (isJson ? "Something went wrong (server error " + r.status + ")"
+      : `The server answered ${r.status} instead of Orivoclass. Open the dashboard from the Orivoclass server (run node server.js, then visit http://localhost:3000), not from a file or a static host.`);
+    throw Object.assign(new Error(msg), { status: r.status });
+  }
   return d;
 }
 const fmt = (n) => Number(n || 0).toLocaleString();
@@ -313,7 +321,7 @@ function showAuth() {
 }
 $("authSwitch").onclick = () => { mode = mode === "login" ? "signup" : "login"; $("authErr").textContent = ""; showAuth(); };
 async function submitAuth() {
-  try { await api(mode === "login" ? "/auth/login" : "/auth/signup", "POST", { email: $("email").value, password: $("pw").value }); $("pw").value = ""; $("authErr").textContent = ""; boot(); }
+  try { await api(mode === "login" ? "/auth/login" : "/auth/signup", "POST", { email: $("email").value, password: $("pw").value }); $("pw").value = ""; $("authErr").textContent = ""; boot(true); }
   catch (e) { $("authErr").textContent = e.message; }
 }
 $("authBtn").onclick = submitAuth;
@@ -330,7 +338,8 @@ function openTab(name) {
 }
 document.querySelectorAll("nav [data-tab]").forEach((b) => (b.onclick = () => openTab(b.dataset.tab)));
 
-async function boot() {
+async function boot(fromAuth) {
+  if (location.protocol === "file:") { showAuth(); $("authErr").textContent = "Open the dashboard through the server: run node server.js, then visit http://localhost:3000 (do not open index.html directly)."; return; }
   try {
     const me = await api("/auth/me");
     $("auth").hidden = true; $("app").hidden = false;
@@ -340,7 +349,12 @@ async function boot() {
     await loadKeys();
     let tab = "overview"; try { tab = localStorage.getItem("orv_tab") || tab; } catch {}
     openTab(document.getElementById("tab-" + tab) ? tab : "overview");
-  } catch { showAuth(); }
+  } catch (e) {
+    showAuth();
+    if (fromAuth) $("authErr").textContent = e.status === 401
+      ? "You were signed in, but your browser did not keep the session cookie. Allow cookies for this site. If you are not using HTTPS, remove COOKIE_SECURE=1 from .env and restart the server."
+      : e.message;
+  }
 }
 
 function fillConfig() {
