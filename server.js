@@ -72,7 +72,7 @@ const IMAGE_TOOL = {
 };
 
 /* ======================= Tiny JSON database ======================= */
-const DB_FILE = path.join(__dirname, "data.json");
+const DB_FILE = env.DATA_FILE || path.join(__dirname, "data.json");
 let db = { users: [], keys: [], sessions: {}, logs: [], projects: [] };
 try { db = Object.assign(db, JSON.parse(fs.readFileSync(DB_FILE, "utf8"))); } catch {}
 for (const k of db.keys) { // migrate keys created by older versions
@@ -80,7 +80,11 @@ for (const k of db.keys) { // migrate keys created by older versions
   k.usage ||= {}; k.totals ||= { chat: k.requests || 0, image: 0, errors: 0 };
 }
 let saveTimer = null;
-const flush = () => { clearTimeout(saveTimer); saveTimer = null; fs.writeFileSync(DB_FILE, JSON.stringify(db)); };
+const flush = () => {
+  clearTimeout(saveTimer); saveTimer = null;
+  try { fs.writeFileSync(DB_FILE, JSON.stringify(db)); }
+  catch (e) { console.error("Could not save data to " + DB_FILE + ": " + e.message); } // never crash the server over this
+};
 const save = () => { if (!saveTimer) saveTimer = setTimeout(flush, 300); };
 process.on("SIGINT", () => { flush(); process.exit(0); });
 process.on("SIGTERM", () => { flush(); process.exit(0); });
@@ -879,4 +883,6 @@ http
   .listen(PORT, () => {
     console.log(`Orivoclass is running on http://localhost:${PORT}`);
     if (!GEMINI_KEY) console.log("Warning: GEMINI_API_KEY is not set. Add it to .env to enable the AI.");
+    try { fs.accessSync(path.dirname(DB_FILE), fs.constants.W_OK); }
+    catch { console.log("Warning: cannot write to " + DB_FILE + ". Accounts and sites will be lost on restart. Set DATA_FILE in .env to a writable path."); }
   });
